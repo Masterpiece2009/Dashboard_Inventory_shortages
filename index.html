@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>لوحة نواقص المخازن — يناير</title>
+
+  <!-- Bootstrap 5 (RTL) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.rtl.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: "Cairo", sans-serif; background:#f6f8fa; }
+    .card { border:0; box-shadow: 0 6px 18px rgba(0,0,0,0.06); }
+    .small-muted { font-size:0.85rem; color:#6c757d }
+    .rtl-table th { cursor: pointer; user-select:none; }
+    .badge-count { min-width:64px; display:inline-block; text-align:center; }
+    .nowrap { white-space: nowrap; }
+    .table-responsive { max-height:56vh; overflow:auto; }
+  </style>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="container py-4">
+    <header class="mb-3 d-flex align-items-center justify-content-between">
+      <div>
+        <h2 class="mb-0">التقرير اليومي لنواقص المخازن — يناير</h2>
+        <div class="small-muted">لوحة عرض خفيفة مع أقل تحليل بيانات (عدد العناصر، حالة الطلب، تصنيف)</div>
+      </div>
+      <div class="text-end">
+        <a class="btn btn-sm btn-outline-secondary me-2" id="downloadCsv">تحميل CSV</a>
+        <a class="btn btn-sm btn-primary" href="https://github.com/Masterpiece2009/Dashboard_Inventory_shortages" target="_blank">مستودع GitHub</a>
+      </div>
+    </header>
+
+    <!-- Overview -->
+    <div class="row g-3 mb-3">
+      <div class="col-12 col-md-5">
+        <div class="card p-3">
+          <div class="d-flex align-items-start">
+            <div class="flex-grow-1">
+              <div class="d-flex gap-2 flex-wrap mb-2">
+                <div class="badge bg-warning text-dark badge-count" id="totalItems">--</div>
+                <div class="badge bg-info text-dark badge-count" id="totalRequested">--</div>
+                <div class="badge bg-success badge-count" id="totalDelivered">--</div>
+                <div class="badge bg-danger badge-count" id="lowBalanceCount">--</div>
+              </div>
+              <div class="small-muted">المجموع | المطلوب | تم التوريد | أرصدة سالبة أو قليلة</div>
+            </div>
+            <div style="width:160px">
+              <canvas id="statusChart" width="160" height="120"></canvas>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12 col-md-7">
+        <div class="card p-3">
+          <div class="row g-2 align-items-center mb-2">
+            <div class="col-sm-5">
+              <input id="search" class="form-control form-control-sm" placeholder="بحث (اسم الصنف أو رقم الباركود)" />
+            </div>
+            <div class="col-sm-3">
+              <select id="filterStatus" class="form-select form-select-sm">
+                <option value="">كل الحالات</option>
+                <option>تم الطلب</option>
+                <option>تم التوريد</option>
+              </select>
+            </div>
+            <div class="col-sm-4 text-start">
+              <select id="pageSize" class="form-select form-select-sm w-auto d-inline-block">
+                <option value="10">10 صفوف</option>
+                <option value="20" selected>20 صف</option>
+                <option value="50">50 صف</option>
+              </select>
+              <span class="small-muted mx-2">حجم الصفحة</span>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-striped table-hover table-sm rtl-table" id="itemsTable">
+              <thead class="table-light">
+                <tr>
+                  <th data-key="barcode">الباركود/مرجع</th>
+                  <th data-key="name">اسم الصنف</th>
+                  <th data-key="last_qty">اخر كمية</th>
+                  <th data-key="last_date">تاريخ اخر توريد</th>
+                  <th data-key="required_qty">الكمية المطلوبة</th>
+                  <th data-key="request_date">تاريخ الطلب</th>
+                  <th data-key="lead_time">مدة التوريد (يوم)</th>
+                  <th data-key="category">التصنيف</th>
+                  <th data-key="availability">توفر المنتج</th>
+                  <th data-key="system_balance">رصيد السيستم</th>
+                  <th data-key="status">حالة الطلب</th>
+                </tr>
+              </thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+
+          <nav class="mt-2">
+            <ul class="pagination pagination-sm justify-content-center mb-0" id="pagination"></ul>
+          </nav>
+        </div>
+      </div>
+    </div>
+
+    <!-- Category chart and notes -->
+    <div class="row g-3">
+      <div class="col-12 col-md-6">
+        <div class="card p-3">
+          <h6 class="mb-3">توزيع التصنيفات</h6>
+          <canvas id="categoryChart" height="200"></canvas>
+        </div>
+      </div>
+      <div class="col-12 col-md-6">
+        <div class="card p-3">
+          <h6 class="mb-2">ملاحظات سريعة</h6>
+          <ul id="notesList" class="mb-0 small" style="max-height:180px; overflow:auto;"></ul>
+        </div>
+      </div>
+    </div>
+
+    <footer class="mt-4 small-muted text-center">
+      <div>نشر على GitHub Pages: ضع هذا الملف index.html في الريبو واضبط Pages ليستخدم الفرع main / المجلد root</div>
+    </footer>
+  </div>
+
+<script>
+/*
+  Embedded data (converted from provided Arabic table).
+  Minimal preprocessing: keep original text for quantities/dates, parse numeric system_balance and lead_time.
+*/
+const DATA = [
+{"barcode":"3354","name":"فول سودانى - زبدة خام","last_qty":"250","last_date":"2025/11/30","required_qty":"150 ك","request_date":"2025/12/9","lead_time":27,"category":"خامات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":152.41,"status":"تم الطلب"},
+{"barcode":"3305","name":"زيت عرق سوس","last_qty":"12.55 ك","last_date":"2025/09/21","required_qty":"5 ك","request_date":"2025/12/10","lead_time":26,"category":"خامات","availability":"نفذت الكمية","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":14.62,"status":"تم الطلب"},
+{"barcode":"3152","name":"زيت السعد خام","last_qty":"30.500","last_date":"2025/11/25","required_qty":"30","request_date":"2025/12/17","lead_time":19,"category":"خامات","availability":"علي وشك الانتهاء","notes":"تم تجديد الطلب مع المشتريات وبانتظار التوريد","system_balance":46.29,"status":"تم الطلب"},
+{"barcode":"7779223","name":"جلسرين","last_qty":"3 ك","last_date":"2025/07/21","required_qty":"1 ك","request_date":"2025/12/20","lead_time":16,"category":"خامات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":2.52,"status":"تم الطلب"},
+{"barcode":"NR","name":"كربابول","last_qty":"NR","last_date":"NR","required_qty":"1 ك","request_date":"2025/12/20","lead_time":16,"category":"خامات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":1.79,"status":"تم الطلب"},
+{"barcode":"651827010","name":"دبس رمان خام","last_qty":"677 ك","last_date":"2025/12/08","required_qty":"500 ك","request_date":"2025/12/28","lead_time":8,"category":"خامات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":135.64,"status":"تم الطلب"},
+{"barcode":"65236010","name":"دبس تمر خام","last_qty":"705 ك","last_date":"2025/12/26","required_qty":"1200 ك","request_date":"2025/12/28","lead_time":8,"category":"خامات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":816.98,"status":"تم الطلب"},
+{"barcode":"641760010","name":"بذور كتان","last_qty":"1 طن","last_date":"2025/12/11","required_qty":"NR","request_date":"NR","lead_time":null,"category":"خامات","availability":"نفذت الكمية","notes":"سيتم تسليم الكمية المرصودة كمرتجع والتي تبلغ 1 طن وسيتم توريد كمية اخري فور تسليم المرتجع","system_balance":20,"status":"تم الطلب"},
+{"barcode":"3204","name":"دقة زعتر ملكي خام","last_qty":"1020 ك","last_date":"2025/11/12","required_qty":"400","request_date":"2026/1/4","lead_time":1,"category":"خامات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":949.09,"status":"تم الطلب"},
+{"barcode":"65240010","name":"دقة زعتر خام","last_qty":"1 طن","last_date":"2025/10/14","required_qty":"250","request_date":"2026/1/4","lead_time":1,"category":"خامات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":421.85,"status":"تم الطلب"},
+{"barcode":"3213","name":"عبوة معدنية 500 مللي","last_qty":"2835","last_date":"2025/12/02","required_qty":"20000","request_date":"2025/12/10","lead_time":26,"category":"عبوات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":354,"status":"تم الطلب"},
+{"barcode":"1938","name":"عبوة بلاستيك شفاف دائرية للدقيق 700 جم","last_qty":"10080","last_date":"2025/09/11","required_qty":"5000","request_date":"2025/12/15","lead_time":21,"category":"عبوات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":2064,"status":"تم الطلب"},
+{"barcode":"1877","name":"عبوة بلاستيك شفاف دائرية للدقيق 500 جم","last_qty":"1020","last_date":"2025/10/05","required_qty":"5000","request_date":"2025/12/20","lead_time":16,"category":"عبوات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":5642,"status":"تم الطلب"},
+{"barcode":"3045","name":"عبوة مخمرية فارغة بالبامب","last_qty":"2016","last_date":"2025/10/16","required_qty":"2000","request_date":"2025/12/20","lead_time":16,"category":"عبوات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":664,"status":"تم الطلب"},
+{"barcode":"699","name":"عبوة بلاستيك شفاف للتوابل","last_qty":"10404","last_date":"2025/11/18","required_qty":"6000","request_date":"2026/1/5","lead_time":0,"category":"عبوات","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":7880,"status":"تم الطلب"},
+{"barcode":"6224004044325","name":"تمر سبريد كلاسيك عبوة زجاج 230 جرام فيرجينيا","last_qty":"696","last_date":"2025/12/13","required_qty":"650","request_date":"2025/12/24","lead_time":12,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":66,"status":"تم الطلب"},
+{"barcode":"6224004044332","name":"تمر سبريد بالقرفة عبوة زجاج 230 جرام فيرجينيا","last_qty":"336","last_date":"2025/12/13","required_qty":"600","request_date":"2025/12/24","lead_time":12,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":142,"status":"تم الطلب"},
+{"barcode":"6224004044356","name":"تمر سبريد بالبندق عبوة زجاج 230 جرام فيرجينيا","last_qty":"768","last_date":"2025/12/13","required_qty":"450","request_date":"2025/12/24","lead_time":12,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":346,"status":"تم الطلب"},
+{"barcode":"6224004044349","name":"تمر سبريد بالفانليا عبوة زجاج 230 جرام فيرجينيا","last_qty":"204","last_date":"2025/12/13","required_qty":"300","request_date":"2025/12/24","lead_time":12,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":154,"status":"تم الطلب"},
+{"barcode":"6115518010","name":"مخلل خيار برطمان 600 جم فيرجينيا","last_qty":"252","last_date":"2025/12/06","required_qty":"250","request_date":"2025/12/28","lead_time":8,"category":"منتج لدي الغير","availability":"نفذت الكمية","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":1,"status":"تم الطلب"},
+{"barcode":"6224002205940","name":"مخلل زيتون اخضر محشي جزر عبوة بلاستيك 600 جرام فيرجينيا","last_qty":"252","last_date":"2025/12/06","required_qty":"250","request_date":"2025/12/28","lead_time":8,"category":"منتج لدي الغير","availability":"نفذت الكمية","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":2,"status":"تم الطلب"},
+{"barcode":"6225000381551","name":"مخلل ليمون معصفر اصفر برطمان 650 جم فيرجينيا","last_qty":"252","last_date":"2025/12/06","required_qty":"250","request_date":"2025/12/28","lead_time":8,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":13,"status":"تم الطلب"},
+{"barcode":"6224002205957","name":"مخلل بصل عبوة بلاستيك 600 جرام فيرجينيا","last_qty":"300","last_date":"2025/12/06","required_qty":"250","request_date":"2025/12/28","lead_time":8,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":3,"status":"تم الطلب"},
+{"barcode":"6224002205933","name":"زيتون اخضر شرائح عبوة بلاستيك 600 جرام فيرجينيا","last_qty":"252","last_date":"2025/12/06","required_qty":"250","request_date":"2025/12/28","lead_time":8,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":49,"status":"تم الطلب"},
+{"barcode":"6225000381544","name":"مخلل مشكل برطمان 600 جم فيرجينيا","last_qty":"468","last_date":"2025/12/06","required_qty":"250","request_date":"2025/12/28","lead_time":8,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":106,"status":"تم الطلب"},
+{"barcode":"6224004044448","name":"تمرية عبوة زجاج 230جرام فيرجينيا","last_qty":"792","last_date":"2025/10/06","required_qty":"1500","request_date":"2025/10/16","lead_time":81,"category":"منتج لدي الغير","availability":"نفذت الكمية","notes":"تم التوريد بكمية تبلغ 1472 عبوة بتاريخ 24-11-2025 وتم الرفض من قبل الجودة","system_balance":16,"status":"تم الطلب"},
+{"barcode":"6224002205865","name":"تمر الوادي كاجو عبوة بلاستيك 450 جرام فيرجينيا","last_qty":"2088","last_date":"2025/09/29","required_qty":"700","request_date":"2025/12/13","lead_time":23,"category":"منتج لدي الغير","availability":"نفذت الكمية","notes":"تم التوريد بكمية تبلغ 738 بتاريخ 2025/12/26 وتم الرفض من قبل الجودة وتم الرصد كمرتجع وتم تجديد الطلب مع المشتريات","system_balance":9,"status":"تم الطلب"},
+{"barcode":"6224002205674","name":"صوص صويا عبوة بلاستيك اسكويز 200 جرام فيرجينيا","last_qty":"2492","last_date":"2025/10/25","required_qty":"1200","request_date":"2025/12/13","lead_time":23,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":222,"status":"تم الطلب"},
+{"barcode":"6224002205858","name":"تمر الوادي باللوز عبوة بلاستيك 450 جرام فيرجينيا","last_qty":"2160","last_date":"2025/09/29","required_qty":"700","request_date":"2025/12/13","lead_time":23,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"تم التوريد بكمية تبلغ 558 بتاريخ 2025/12/26 وتم الرفض من قبل الجودة وتم الرصد كمرتجع وتم تجديد الطلب مع المشتريات","system_balance":-45,"status":"تم الطلب"},
+{"barcode":"6224002205926","name":"صابون نعناع عادى فيرجينيا","last_qty":"2160","last_date":"2025/09/11","required_qty":"توريد مباشر","request_date":"NR","lead_time":null,"category":"منتج لدي الغير","availability":"علي وشك الانتهاء","notes":"يتوفر stock بالصالة و بانتظار التصنيع","system_balance":288,"status":"تم الطلب"},
+{"barcode":"115405000000","name":"بابونج عطارة","last_qty":"14 ك","last_date":"2025/12/25","required_qty":"25 ك","request_date":"2026/1/3","lead_time":2,"category":"عطارة","availability":"نفذت الكمية","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":13.8,"status":"تم الطلب"},
+{"barcode":"NR","name":"ورق سدر عطارة","last_qty":"25 ك","last_date":"2025/10/25","required_qty":"25 ك","request_date":"2026/1/3","lead_time":2,"category":"عطارة","availability":"نفذت الكمية","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":0.1,"status":"تم الطلب"},
+{"barcode":"153754000000","name":"بهارات خلطة بشاميل جبنة عطارة","last_qty":"400","last_date":"2025/8/19","required_qty":"25","request_date":"2026/1/4","lead_time":1,"category":"عطارة","availability":"نفذت الكمية","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":0.03,"status":"تم الطلب"},
+{"barcode":"112310000000","name":"بهارات فراخ","last_qty":"50","last_date":"2026/01/01","required_qty":"75","request_date":"2026/1/4","lead_time":1,"category":"عطارة","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":94,"status":"تم الطلب"},
+{"barcode":"115297000000","name":"بهارات لحمة","last_qty":"50","last_date":"2026/01/01","required_qty":"75","request_date":"2026/1/4","lead_time":1,"category":"عطارة","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":95.55,"status":"تم الطلب"},
+{"barcode":"112355000000","name":"فلفل اسود ناعم","last_qty":"50","last_date":"2026/01/01","required_qty":"75","request_date":"2026/1/4","lead_time":1,"category":"عطارة","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":80.55,"status":"تم الطلب"},
+{"barcode":"115419000000","name":"سبع بهارات عطارة","last_qty":"75","last_date":"2026/01/01","required_qty":"100","request_date":"2026/1/4","lead_time":1,"category":"عطارة","availability":"علي وشك الانتهاء","notes":"تم الطلب من المشتريات وبانتظار التوريد","system_balance":120.23,"status":"تم الطلب"},
+{"barcode":"48192010","name":"كرتونة فارغة زجاج زيت 1 لتر * 6 زجاجة فيرجينيا","last_qty":"2660","last_date":"2025/12/29","required_qty":"5000","request_date":"2025/12/18","lead_time":18,"category":"استهلاكيات","availability":"علي وشك الانتهاء","notes":"تم التوريد بكمية تبلغ 2660 كرتونة وبانتظار التوريد لباقي الكمية المطلوبة","system_balance":12720,"status":"تم الطلب"},
+{"barcode":"62223010","name":"سمسم خام ابيض للطحينة","last_qty":"2.5 طن","last_date":"2025/12/25","required_qty":"2500","request_date":"2025/12/20","lead_time":16,"category":"خامات","availability":"علي وشك الانتهاء","notes":"اليوم تم التوريد بكمية تبلغ 1675 ك وتم الرفض من قبل الجودة","system_balance":691,"status":"تم الطلب"},
+{"barcode":"11136010","name":"عبوة معدنية 1000 مللي","last_qty":"10836","last_date":"2025/11/23","required_qty":"50000","request_date":"2025/9/14","lead_time":113,"category":"عبوات","availability":"علي وشك الانتهاء","notes":"اليوم تم التوريد بكمية تبلغ 8974 عبوة وسيتم ادخال الكمية علي السيستم فور الانتهاء من الجرد","system_balance":7068,"status":"تم التوريد"},
+{"barcode":"112351000000","name":"كسبره ناعم عطارة","last_qty":"30 ك","last_date":"2026/1/5","required_qty":"50","request_date":"2025/12/17","lead_time":19,"category":"عطارة","availability":"تم توفير الطلب","notes":"اليوم تم التوريد بكمية تبلغ 30 ك وتم الاعتماد من قبل الجودة","system_balance":46.17,"status":"تم التوريد"},
+{"barcode":"3178","name":"استيكر طحينة 650 جم الطحان 17.5*7.5 فيرجينيا","last_qty":"50000","last_date":"2026/01/05","required_qty":"20000","request_date":"2025/12/25","lead_time":10,"category":"استيكرات","availability":"تم توفير الطلب","notes":"اليوم تم التوريد بكمية تبلغ 50000 استيكر وسيتم ادخال الكمية فور الانتهاء من الجرد وفحص الجودة","system_balance":25395,"status":"تم التوريد"},
+{"barcode":"6224004044431","name":"ماء ورد شرب عبوة بيلاستيك 285 ملليلتر فيرجينيا","last_qty":"600","last_date":"2026/01/05","required_qty":"NR","request_date":"NR","lead_time":null,"category":"منتج لدي الغير","availability":"تم توفير الطلب","notes":"اليوم تم التوريد بكمية تبلغ 600 عبوة وتم الاعتماد من قبل الجودة","system_balance":999,"status":"تم التوريد"}
+];
+
+
+// Utilities
+const parseNum = n => (typeof n === 'number' ? n : (n===null || n===undefined) ? NaN : Number(String(n).replace(/,/g,'').replace(/[^\d.-]/g,'')));
+const formatNum = n => (isNaN(n) ? "-" : (n % 1 === 0 ? n.toLocaleString('en-US') : n.toLocaleString('en-US')));
+
+// State
+let filtered = DATA.slice();
+let sortKey = null;
+let sortDir = 1;
+let currentPage = 1;
+let pageSize = 20;
+
+// Elements
+const tbody = document.getElementById('tbody');
+const searchInput = document.getElementById('search');
+const filterStatus = document.getElementById('filterStatus');
+const pageSizeEl = document.getElementById('pageSize');
+const paginationEl = document.getElementById('pagination');
+const totalItemsEl = document.getElementById('totalItems');
+const totalRequestedEl = document.getElementById('totalRequested');
+const totalDeliveredEl = document.getElementById('totalDelivered');
+const lowBalanceCountEl = document.getElementById('lowBalanceCount');
+const notesList = document.getElementById('notesList');
+
+// Initial
+function refresh() {
+  // apply filters
+  const q = searchInput.value.trim().toLowerCase();
+  const status = filterStatus.value;
+  filtered = DATA.filter(row => {
+    if (status && row.status !== status) return false;
+    if (!q) return true;
+    return (row.name + ' ' + row.barcode + ' ' + (row.notes||'')).toLowerCase().includes(q);
+  });
+
+  // sort
+  if (sortKey) {
+    filtered.sort((a,b)=>{
+      let va = a[sortKey], vb = b[sortKey];
+      // numeric compare for system_balance & lead_time
+      if (sortKey === 'system_balance' || sortKey === 'lead_time') {
+        return (parseNum(va) - parseNum(vb)) * sortDir;
+      }
+      va = String(va||'').toLowerCase();
+      vb = String(vb||'').toLowerCase();
+      return va > vb ? sortDir : va < vb ? -sortDir : 0;
+    });
+  }
+
+  // pagination
+  pageSize = parseInt(pageSizeEl.value,10) || 20;
+  const total = filtered.length;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  if (currentPage > pages) currentPage = pages;
+  const start = (currentPage-1)*pageSize;
+  const visible = filtered.slice(start, start+pageSize);
+
+  // render rows
+  tbody.innerHTML = visible.map(r => `
+    <tr>
+      <td class="nowrap">${r.barcode}</td>
+      <td>${r.name}</td>
+      <td class="nowrap">${r.last_qty}</td>
+      <td class="nowrap">${r.last_date}</td>
+      <td class="nowrap">${r.required_qty}</td>
+      <td class="nowrap">${r.request_date}</td>
+      <td class="nowrap text-center">${r.lead_time === null ? '-' : r.lead_time}</td>
+      <td>${r.category}</td>
+      <td>${r.availability}</td>
+      <td class="text-end">${formatNum(parseNum(r.system_balance))}</td>
+      <td>${r.status}</td>
+    </tr>
+  `).join('');
+
+  // pagination controls
+  renderPagination(pages);
+
+  // overview stats (minimal analysis)
+  const totalItems = DATA.length;
+  const totalRequested = DATA.filter(d => d.status === 'تم الطلب').length;
+  const totalDelivered = DATA.filter(d => d.status === 'تم التوريد').length;
+  const lowBalanceCount = DATA.filter(d => parseNum(d.system_balance) <= 5).length;
+
+  totalItemsEl.textContent = `الإجمالي ${totalItems}`;
+  totalRequestedEl.textContent = `مطلوب ${totalRequested}`;
+  totalDeliveredEl.textContent = `مستلم ${totalDelivered}`;
+  lowBalanceCountEl.textContent = `قليل ${lowBalanceCount}`;
+
+  // update charts & notes
+  updateCharts();
+  renderNotes();
+}
+
+function renderPagination(pages){
+  const ar = [];
+  for (let i=1;i<=pages;i++){
+    ar.push(`<li class="page-item ${i===currentPage?'active':''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`);
+  }
+  paginationEl.innerHTML = ar.join('');
+  // Add listeners
+  paginationEl.querySelectorAll('a[data-page]').forEach(a=>{
+    a.addEventListener('click', e=>{
+      e.preventDefault();
+      currentPage = Number(a.dataset.page);
+      refresh();
+      window.scrollTo({top:0,behavior:'smooth'});
+    });
+  });
+}
+
+// Sorting by header
+document.querySelectorAll('#itemsTable thead th').forEach(th=>{
+  th.addEventListener('click', ()=> {
+    const key = th.dataset.key;
+    if (!key) return;
+    if (sortKey === key) sortDir = -sortDir; else { sortKey = key; sortDir = 1; }
+    refresh();
+  });
+});
+
+// Filters
+searchInput.addEventListener('input', ()=> { currentPage = 1; refresh(); });
+filterStatus.addEventListener('change', ()=> { currentPage = 1; refresh(); });
+pageSizeEl.addEventListener('change', ()=> { currentPage = 1; refresh(); });
+
+// CSV Download of current filtered set
+document.getElementById('downloadCsv').addEventListener('click', ()=>{
+  const rows = filtered.map(r => ({
+    barcode: r.barcode, name: r.name, last_qty: r.last_qty, last_date: r.last_date,
+    required_qty: r.required_qty, request_date: r.request_date, lead_time: r.lead_time,
+    category: r.category, availability: r.availability, notes: r.notes,
+    system_balance: r.system_balance, status: r.status
+  }));
+  const headers = ["barcode","name","last_qty","last_date","required_qty","request_date","lead_time","category","availability","notes","system_balance","status"];
+  const csv = [
+    headers.join(','),
+    ...rows.map(r => headers.map(h => `"${String(r[h] ?? '').replace(/"/g,'""')}"`).join(','))
+  ].join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'inventory_shortages_january.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+// Charts
+let statusChart = null;
+let categoryChart = null;
+
+function updateCharts(){
+  const statusCounts = DATA.reduce((acc,d)=>{
+    acc[d.status] = (acc[d.status]||0)+1; return acc;
+  },{});
+  const labels = Object.keys(statusCounts);
+  const values = Object.values(statusCounts);
+  const colors = labels.map(l => l.includes('تم التوريد') ? '#198754' : '#ffc107');
+
+  if (statusChart) {
+    statusChart.data.labels = labels;
+    statusChart.data.datasets[0].data = values;
+    statusChart.update();
+  } else {
+    const ctx = document.getElementById('statusChart');
+    statusChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels, datasets:[{ data: values, backgroundColor:colors }]},
+      options: { plugins:{legend:{position:'bottom',labels:{boxWidth:10}}}}
+    });
+  }
+
+  const catCounts = DATA.reduce((acc,d)=>{ acc[d.category] = (acc[d.category]||0)+1; return acc; },{});
+  const catLabels = Object.keys(catCounts);
+  const catValues = Object.values(catCounts);
+  const palette = ['#0d6efd','#6f42c1','#fd7e14','#0dcaf0','#198754','#dc3545','#6c757d','#20c997','#6610f2'];
+
+  if (categoryChart) {
+    categoryChart.data.labels = catLabels;
+    categoryChart.data.datasets[0].data = catValues;
+    categoryChart.update();
+  } else {
+    const ctx2 = document.getElementById('categoryChart');
+    categoryChart = new Chart(ctx2, {
+      type: 'bar',
+      data: { labels:catLabels, datasets: [{ data:catValues, backgroundColor: palette.slice(0,catLabels.length) }]},
+      options: {
+        indexAxis: 'y',
+        plugins:{legend:{display:false}},
+        scales:{x:{beginAtZero:true}}
+      }
+    });
+  }
+}
+
+// Notes rendering (show top recent notes where status is طلب or delivered)
+function renderNotes(){
+  const notes = DATA.filter(d => d.notes && d.notes.trim()).slice(0,12);
+  notesList.innerHTML = notes.map(n => `<li class="mb-2"><strong>${n.name}</strong> — <span class="small-muted">${n.notes}</span></li>`).join('');
+}
+
+// Initial draw
+refresh();
+
+/* Small helper: expose DATA for debugging in console if needed:
+   window.__DATA = DATA;
+*/
+</script>
+</body>
+</html>
