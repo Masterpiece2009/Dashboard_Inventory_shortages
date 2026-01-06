@@ -291,16 +291,6 @@
   </div>
 
 <script>
-/*
-  Improvements included:
-  - Fixed normalization (previous version had an unfinished return causing charts not to render).
-  - Better parsing for fields in the provided JSON sample (keys like "الباركود \\ مرجع داخلي", "مدة التوريد من تاريخ الطلب", etc).
-  - Modernized Chart.js styles: gradients, center label for doughnut, small sparklines for KPIs.
-  - More robust handling of "NR", empty strings and various units (e.g. "ك", "طن").
-  - Health legend rendered as HTML for better readability on dark themes.
-  - Increased default chart responsiveness and accessibility hints.
-*/
-
 /* ==========================
    Configuration / Globals
    ========================== */
@@ -309,7 +299,8 @@ const apiUrl = 'https://script.google.com/macros/s/AKfycbzXQ-Jkb-b-Y4NR4qRfXsNlw
 
 let RAW = null;              // raw API response object
 let ROWS = [];               // normalized rows used by UI
-let charts = { category: null, health: null, delay: null, spark: [] };
+// charts.spark is now an object map of canvasId => Chart instance
+let charts = { category: null, health: null, delay: null, spark: {} };
 let currentPage = 1;
 let pageSize = Number(document.getElementById('pageSize').value) || 20;
 let sortKey = null, sortDir = 1;
@@ -336,9 +327,7 @@ function parseNum(value){
   if (typeof value === 'number') return value;
   const s = String(value).trim();
   if (!s || s.toLowerCase() === 'nr' || s.toLowerCase() === 'n/a' || s === '-') return NaN;
-  // Replace Arabic commas, replace arabic digits if any (we'll keep simple)
-  const normalized = s.replace(/[٬,]/g, '').replace(/ك\b|ك\./g,'').replace(/كغ|كجم/g,'').replace(/\s*طن\b/gi, ''); // remove unit characters
-  // Remove any non digit/dot/minus
+  const normalized = s.replace(/[٬,]/g, '').replace(/ك\b|ك\./g,'').replace(/كغ|كجم/g,'').replace(/\s*طن\b/gi, '');
   const cleaned = normalized.replace(/[^\d.\-]/g,'');
   const n = Number(cleaned);
   return isNaN(n) ? NaN : n;
@@ -348,12 +337,15 @@ function parseNum(value){
 function fmtNum(n){
   if (n === null || n === undefined || isNaN(Number(n))) return '-';
   const num = Number(n);
-  // Use Arabic-Indic digits for better locale feel? keep western for readability
   return Number.isInteger(num) ? num.toLocaleString('en-US') : num.toLocaleString('en-US');
 }
 
-/* Animate numeric value in element from 0 to target */
+/* Animate numeric value in element from 0 to target
+   FIX: replaced invalid (--t)*t*t+1 expression (it attempted to decrement a const
+   and could throw). Using easeOutCubic formula instead.
+*/
 function animateValue(el, start, end, duration=700){
+  if (!el) return;
   start = Number(start) || 0;
   end = Number(end) || 0;
   const range = end - start;
@@ -363,8 +355,9 @@ function animateValue(el, start, end, duration=700){
   }
   const startTime = performance.now();
   function step(now){
-    const t = Math.min(1, (now - startTime) / duration);
-    const eased = (--t)*t*t+1; // easeOutCubic
+    const tRaw = Math.min(1, (now - startTime) / duration);
+    // easeOutCubic
+    const eased = 1 - Math.pow(1 - tRaw, 3);
     const current = Math.round(start + (range * eased));
     el.textContent = fmtNum(current);
     if (now - startTime < duration) requestAnimationFrame(step);
@@ -393,7 +386,6 @@ const pageSizeEl = document.getElementById('pageSize');
 async function fetchData(){
   try {
     btnRefresh.disabled = true;
-    const originalText = btnRefresh.textContent;
     btnRefresh.innerHTML = '🔄 جارٍ التحديث <span class="spinner-inline" aria-hidden="true"></span>';
 
     const resp = await fetch(apiUrl, {cache: 'no-store'});
@@ -403,14 +395,11 @@ async function fetchData(){
     RAW = json;
     lastUpdatedEl.textContent = `آخر تحديث: ${formatGeneratedAt(RAW.generatedAt)}`;
 
-    // Normalize rows (map Arabic keys to consistent keys we use)
     ROWS = normalizeRows(RAW.rows || []);
 
-    // reset pagination and rendering
     currentPage = 1;
     pageSize = Number(pageSizeEl.value) || 20;
 
-    // render everything
     calculateAndRenderAll();
 
   } catch(err){
@@ -433,21 +422,14 @@ function formatGeneratedAt(iso){
 
 /* ===========================
    Normalize input rows to stable object shape
-   Returned object:
-   {
-     barcode, name, category, system_balance (number|null),
-     availability, status, lead_time (number|null), raw
-   }
 */
 function normalizeRows(rawRows){
   if (!Array.isArray(rawRows)) return [];
   return rawRows.map(r => {
-    // many sheets use slightly different Arabic keys; we detect by contains rather than exact match
     function pickByPossible(keys){
       for (const k of keys){
         if (k in r) return r[k];
       }
-      // fallback: search keys that include a substring
       for (const key of Object.keys(r)){
         for (const k of keys){
           if (key && key.toString().includes(k)) return r[key];
@@ -456,29 +438,24 @@ function normalizeRows(rawRows){
       return undefined;
     }
 
-    // barcode: look for keys containing "باركود" or "مرجع"
     let barcode = undefined;
     for (const key of Object.keys(r)){
       if (String(key).includes('باركود') || String(key).includes('مرجع')) { barcode = r[key]; break; }
     }
-    // friendly fallbacks
     barcode = barcode ?? pickByPossible(['barcode','الباركود','Barcode']);
 
     const name = pickByPossible(['اسم الصنف','اسم_الصنف','Name','name']) ?? '';
     const category = pickByPossible(['التصنيف','الصنف','Category','category']) ?? 'بدون تصنيف';
 
-    // system balance field variations
     const balanceRaw = pickByPossible(['رصيد السيستم','رصيد_السيستم','system_balance','balance','رصيد']);
     const system_balance = (() => { const n = parseNum(balanceRaw); return isNaN(n) ? null : n; })();
 
     const availability = pickByPossible(['توفر المنتج في المعصرة','توفر المنتج','availability']) ?? '';
     const status = pickByPossible(['حالة الطلب','الحالة','status']) ?? '';
 
-    // lead time variations: "مدة التوريد من تاريخ الطلب" etc
     const leadRaw = pickByPossible(['مدة التوريد من تاريخ الطلب','مدة التوريد','lead_time','leadTime']);
     const lead_time = (() => { const n = parseNum(leadRaw); return isNaN(n) ? null : n; })();
 
-    // keep original raw for searching & debugging
     return {
       barcode,
       name: String(name || '').trim(),
@@ -497,7 +474,6 @@ function normalizeRows(rawRows){
    ========================= */
 function calculateKPIs(data){
   const total = data.length;
-  // Out of stock: explicit availability/status mentions OR system_balance <= 0
   const out = data.filter(d => {
     const av = (d.availability || '').toLowerCase();
     const st = (d.status || '').toLowerCase();
@@ -506,7 +482,6 @@ function calculateKPIs(data){
     return false;
   }).length;
 
-  // Near out: mentions "على وشك" or system_balance 1..5
   const near = data.filter(d => {
     const av = (d.availability || '').toLowerCase();
     const st = (d.status || '').toLowerCase();
@@ -523,20 +498,22 @@ function renderKPIs(kpis){
   animateValue(kpiOutEl, 0, kpis.out, 700);
   animateValue(kpiNearEl, 0, kpis.near, 700);
 
-  // draw tiny sparklines to give visual feedback (simple bars)
   renderSparkline('sparkTotal', [kpis.total, Math.max(0, kpis.total - 3), kpis.total], chartColors.blue);
   renderSparkline('sparkOut', [kpis.out, Math.max(0, kpis.out - 2), kpis.out], chartColors.red);
   renderSparkline('sparkNear', [kpis.near, Math.max(0, kpis.near - 1), kpis.near], chartColors.orange);
 }
 
-/* tiny sparkline renderer */
+/* tiny sparkline renderer
+   FIX: store charts in charts.spark object and ensure destruction safe
+*/
 function renderSparkline(canvasId, data, color){
   try{
     const el = document.getElementById(canvasId);
     if (!el) return;
     const ctx = el.getContext('2d');
-    // destroy previous if exists
-    if (charts.spark[canvasId]) try { charts.spark[canvasId].destroy(); } catch(e){}
+    if (charts.spark && charts.spark[canvasId]){
+      try { charts.spark[canvasId].destroy(); } catch(e){}
+    }
     charts.spark[canvasId] = new Chart(ctx, {
       type: 'line',
       data: { labels: data.map((_,i)=>i), datasets: [{ data, borderColor: color, backgroundColor: color+'22', fill:true, tension:0.4, pointRadius:0 }] },
@@ -551,16 +528,13 @@ function renderSparkline(canvasId, data, color){
 function renderTable(data){
   const q = (searchBox.value || '').trim().toLowerCase();
 
-  // local filter by search box (name or barcode if exists)
   let filtered = data.filter(r => {
     if (!q) return true;
-    // include raw row values to search any field and barcode
     const combined = Object.values(r.raw || {}).join(' ').toLowerCase();
     const bn = String(r.barcode || '').toLowerCase();
     return combined.includes(q) || (r.name || '').toLowerCase().includes(q) || bn.includes(q);
   });
 
-  // sorting if any
   if (sortKey){
     filtered.sort((a,b) => {
       let va = a[sortKey], vb = b[sortKey];
@@ -584,7 +558,6 @@ function renderTable(data){
   const start = (currentPage - 1) * pageSize;
   const visible = filtered.slice(start, start + pageSize);
 
-  // render rows
   tbody.innerHTML = visible.map(r => {
     const sys = (r.system_balance === null) ? '-' : fmtNum(r.system_balance);
     const lead = (r.lead_time === null) ? '-' : r.lead_time;
@@ -602,7 +575,6 @@ function renderTable(data){
     `;
   }).join('');
 
-  // pagination controls
   renderPagination(pages);
 }
 
@@ -611,20 +583,28 @@ function escapeHtml(str){
   return String(str || '').replace(/[&<>"'`=]/g, s => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;","`":"&#x60;","=":"&#x3D;"}[s]));
 }
 
+/* Render pagination and attach single delegated click handler
+   FIX: removed window.scrollTo which caused forced auto-scrolling; use non-scrolling behavior here.
+*/
 function renderPagination(pages){
   const arr = [];
   for (let i=1;i<=pages;i++){
     arr.push(`<li class="page-item ${i===currentPage ? 'active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`);
   }
   paginationEl.innerHTML = arr.join('') || '';
-  paginationEl.querySelectorAll('a[data-page]').forEach(a => {
-    a.addEventListener('click', e => {
-      e.preventDefault();
-      currentPage = Number(a.dataset.page);
-      renderTable(ROWS);
-      window.scrollTo({top:0,behavior:'smooth'});
-    });
-  });
+
+  // Use event delegation: replace any existing handler instead of adding many listeners
+  paginationEl.onclick = function(e){
+    const a = e.target.closest('a[data-page]');
+    if (!a) return;
+    e.preventDefault();
+    const page = Number(a.dataset.page);
+    if (!isFinite(page)) return;
+    if (page === currentPage) return;
+    currentPage = page;
+    renderTable(ROWS);
+    // NOTE: removed automatic window.scrollTo to avoid forced page scrolling.
+  };
 }
 
 /* Table header sorting */
@@ -641,29 +621,31 @@ document.querySelectorAll('#itemsTable thead th').forEach(th=>{
    Charts: prepare & render
    ============================ */
 
+function destroyAllCharts(){
+  try { if (charts.category) charts.category.destroy(); } catch(e){}
+  try { if (charts.health) charts.health.destroy(); } catch(e){}
+  try { if (charts.delay) charts.delay.destroy(); } catch(e){}
+  // destroy sparklines
+  if (charts.spark) {
+    Object.values(charts.spark).forEach(c => { try { if (c && c.destroy) c.destroy(); } catch(e){} });
+    charts.spark = {};
+  }
+}
+
 /* Main entry: destroys previous charts and rerenders */
 function renderCharts(data){
-  // destroy previous charts to avoid duplicates
-  Object.keys(charts).forEach(k => {
-    if (charts[k]) {
-      try { charts[k].destroy(); } catch(e){}
-      charts[k] = null;
-    }
-  });
+  destroyAllCharts();
 
-  // prepare datasets
   const catData = prepareCategoryChartData(data);
   const healthData = prepareHealthChartData(data);
   const delayData = prepareDelayChartData(data);
 
-  // render or show empty states
   renderCategoryChart(catData);
   renderHealthChart(healthData);
   renderDelayChart(delayData);
 }
 
-/* Prepare Category chart data
-   returns { labels:[], values:[], colors:[] } */
+/* Prepare Category chart data */
 function prepareCategoryChartData(data){
   const counts = {};
   data.forEach(d => {
@@ -672,17 +654,11 @@ function prepareCategoryChartData(data){
   });
   const labels = Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
   const values = labels.map(l => counts[l]);
-  const colors = labels.map((_,i) => {
-    // use gradient-ish interpolation between blue and purple
-    return gradientColor(chartColors.blue, chartColors.purple, i, labels.length);
-  });
+  const colors = labels.map((_,i) => gradientColor(chartColors.blue, chartColors.purple, i, labels.length));
   return { labels, values, colors };
 }
 
-/* Prepare Health chart data (doughnut)
-   classifies items into نفذت / على وشك الانتهاء / متوفر
-   returns { labels:[], values:[], colors:[], total }
-*/
+/* Prepare Health chart data */
 function prepareHealthChartData(data){
   let out = 0, near = 0, ok = 0;
   data.forEach(d => {
@@ -699,9 +675,7 @@ function prepareHealthChartData(data){
   return { labels, values, colors, total };
 }
 
-/* Prepare Delay chart data (horizontal bars)
-   Top 8 items by lead_time (largest), returns { labels, values, colors }
-*/
+/* Prepare Delay chart data */
 function prepareDelayChartData(data){
   const withLead = data.filter(d => d.lead_time !== null && !isNaN(d.lead_time));
   const sorted = withLead.sort((a,b)=>b.lead_time - a.lead_time).slice(0,8);
@@ -737,7 +711,6 @@ function renderCategoryChart(catData){
     canvas.style.display = 'block';
   }
 
-  // create gradient per bar using plugin-like approach: Chart.js supports array of colors
   charts.category = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -790,7 +763,6 @@ function renderHealthChart(healthData){
     canvas.style.display = 'block';
   }
 
-  // center text plugin (shows total items)
   const centerTextPlugin = {
     id: 'centerText',
     beforeDraw(chart){
@@ -832,7 +804,6 @@ function renderHealthChart(healthData){
     plugins: [centerTextPlugin]
   });
 
-  // render a simple legend HTML (keeps it clearer on dark backgrounds)
   legendEl.innerHTML = healthData.labels.map((lab,i) => {
     const color = healthData.colors[i];
     const val = healthData.values[i];
@@ -886,14 +857,10 @@ function renderDelayChart(delayData){
    Top-level rendering
    ================== */
 function calculateAndRenderAll(){
-  // 1) KPIs
   const kpis = calculateKPIs(ROWS);
   renderKPIs(kpis);
 
-  // 2) table
   renderTable(ROWS);
-
-  // 3) charts
   renderCharts(ROWS);
 }
 
@@ -917,17 +884,6 @@ pageSizeEl.addEventListener('change', ()=>{
 
 /* Initial fetch when page loads. */
 fetchData();
-
-/* ==============================
-   NOTES
-   - JSON response expected (example provided by you) is supported: keys like
-     "الباركود \\ مرجع داخلي", "مدة التوريد من تاريخ الطلب", "رصيد السيستم" etc.
-   - If charts still appear blank, open DevTools console to see any parsing errors;
-     most common cause is a malformed JSON from the API or unexpected field names.
-   - To add more visualizations (stacked bars, time trends), we can:
-     1) add a "trend over time" endpoint in the Apps Script that returns historical snapshots
-     2) render a line chart with multiple snapshots for each KPI
-   ============================== */
 
 </script>
 </body>
