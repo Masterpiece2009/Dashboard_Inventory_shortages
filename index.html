@@ -152,7 +152,7 @@
     <header class="mb-3 d-flex align-items-start justify-content-between gap-3">
       <div>
         <h2 class="mb-0">لوحة نواقص المخازن — تقرير اليوم (مباشر)</h2>
-        <div class="small-muted">مصدر البيانات: ورقة جوجل اليومية (الشيت الأيسر دائماً). تُجلب البيانات مباشرة من API عند التحديث.</div>
+        <div class="small-muted">مصدر البيانات: ورقة جوجل اليومية (الشيت الأيسر دائماً). تُجلب البيانات مباشرة من API عند التحديث.
         <div class="small-muted mt-1" id="lastUpdated">آخر تحديث: —</div>
       </div>
 
@@ -757,7 +757,11 @@ function renderCategoryChart(catData){
         legend: { display:false },
         tooltip: {
           callbacks: {
-            label: ctx => ` ${ctx.formattedValue} صنف (${Math.round((ctx.raw / (catData.values.reduce((a,b)=>a+b,0)||1))*100)}%)`
+            label: context => {
+              const total = catData.values.reduce((a,b)=>a+b,0) || 1;
+              const pct = Math.round((context.raw / total) * 100);
+              return ` ${context.formattedValue} صنف (${pct}%)`;
+            }
           }
         }
       },
@@ -821,7 +825,7 @@ function renderHealthChart(healthData){
       cutout: '65%',
       plugins: {
         legend: { display:false },
-        tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.formattedValue}` } }
+        tooltip: { callbacks: { label: context => `${context.label}: ${context.formattedValue}` } }
       },
       animation: { duration: 700, easing: 'easeOutQuart' }
     },
@@ -832,7 +836,7 @@ function renderHealthChart(healthData){
   legendEl.innerHTML = healthData.labels.map((lab,i) => {
     const color = healthData.colors[i];
     const val = healthData.values[i];
-    return `<div class="legend-item" role="presentation"><span class="legend-swatch" style="background:${color}"></span> ${escapeHtml(lab)} — <strong style="color:var(--text);margin-inline-start:6px">${val}</strong></div>`;
+    return `<div class="legend-item" role="presentation"><span class="legend-swatch" style="background:${color}"></span> ${escapeHtml(lab)} — <strong style="color:var(--text);margin-inline-start:6px">${fmtNum(val)}</strong></div>`;
   }).join('');
 }
 
@@ -867,7 +871,7 @@ function renderDelayChart(delayData){
       maintainAspectRatio: false,
       plugins: {
         legend: { display:false },
-        tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.formattedValue} يوم` } }
+        tooltip: { callbacks: { label: context => `${context.label}: ${context.formattedValue} يوم` } }
       },
       scales: {
         x: { display: true, grid: { display:false }, ticks: { color: 'var(--text)' } },
@@ -928,4 +932,3 @@ fetchData();
 </script>
 </body>
 </html>
-```
