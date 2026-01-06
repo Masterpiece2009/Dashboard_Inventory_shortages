@@ -152,7 +152,7 @@
     <header class="mb-3 d-flex align-items-start justify-content-between gap-3">
       <div>
         <h2 class="mb-0">لوحة نواقص المخازن — تقرير اليوم (مباشر)</h2>
-        <div class="small-muted">مصدر البيانات: ورقة جوجل اليومية (الشيت الأيسر دائماً). تُجلب البيانات مباشرة من API عند التحديث.
+        <div class="small-muted">
         <div class="small-muted mt-1" id="lastUpdated">آخر تحديث: —</div>
       </div>
 
@@ -183,7 +183,7 @@
           <div>
             <div class="label muted">نفذت الكمية</div>
             <div class="value h3"><span id="kpiOut" class="animated-num">—</span></div>
-            <div class="text-xxs muted">أصناف مُسجلة كـ "نفذت" أو رصيد ≤ 0</div>
+            <div class="text-xxs muted">أصناف مُسجلة كـ "نفذت"</div>
           </div>
           <div style="min-width:120px;text-align:left;">
             <canvas id="sparkOut" width="120" height="40" aria-hidden="true"></canvas>
@@ -234,7 +234,7 @@
             <div class="chart-title">نواقص حسب التصنيف</div>
             <canvas id="categoryChart" height="300" aria-label="شريط النواقص حسب التصنيف"></canvas>
             <div id="catEmpty" class="empty-state" style="display:none;">لا توجد بيانات لعرضها</div>
-            <div class="muted mt-2">تحديد الفئات الأعلى مساهمة في النواقص — يمكن توسيع الفلاتر لاحقاً.</div>
+            <div class="muted mt-2">تحديد الاصناف الأعلى مساهمة في النواقص .</div>
           </div>
 
           <!-- Right: Inventory health doughnut + legend -->
@@ -249,7 +249,7 @@
 
         <!-- Full-width: Critical delays horizontal chart -->
         <div class="chart-card mb-3">
-          <div class="chart-title">أصناف ذات أطول مدة توريد (أعلى 8)</div>
+          <div class="chart-title">أصناف ذات أطول مدة توريد </div>
           <canvas id="delayChart" height="160" aria-label="تأخيرات حرجة"></canvas>
           <div id="delayEmpty" class="empty-state" style="display:none;">لا توجد بيانات لعرضها</div>
           <div class="muted mt-2">عرض العناصر ذات أطول مدة توريد — يساعد في تسريع الطلبات الحرجة.</div>
